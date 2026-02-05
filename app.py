@@ -11,13 +11,13 @@ import shutil
 from urllib.parse import urlparse, urlunparse
 from flask import Flask, request, jsonify, send_file, Response, stream_with_context
 from flask_cors import CORS
+import yt_dlp
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-# Enable CORS for all domains to allow frontend connection from Netlify/Local
 CORS(app) 
 
 # Directories
@@ -43,9 +43,7 @@ def clean_old_files():
                 if now - os.path.getmtime(path) > 3600:
                     os.remove(path)
         
-        # Also clean temp folders
         for str_uuid in list(tasks.keys()):
-            # Remove tasks older than 1 hour from memory
             if 'created_at' in tasks[str_uuid] and now - tasks[str_uuid]['created_at'] > 3600:
                 del tasks[str_uuid]
                 
@@ -55,7 +53,6 @@ def clean_old_files():
 def format_size(size_bytes):
     if size_bytes == 0: return "0B"
     size_name = ("B", "KB", "MB", "GB")
-    i = int(os.path.dirname(str(size_bytes))) # rough log10
     import math
     if size_bytes == 0:
         return "0B"
@@ -71,12 +68,13 @@ USER_AGENTS = [
 ]
 
 def get_referer(url):
-    parsed = urlparse(url)
-    return f"{parsed.scheme}://{parsed.netloc}/"
+    try:
+        parsed = urlparse(url)
+        return f"{parsed.scheme}://{parsed.netloc}/"
+    except:
+        return "https://www.google.com/"
 
 # --- Core Downloader Logic ---
-
-import yt_dlp
 
 class MyLogger:
     def __init__(self, task_id):
@@ -85,6 +83,8 @@ class MyLogger:
     def debug(self, msg):
         if self.task_id in tasks:
             # Filter spammy logs
+            if "merging" in msg.lower() or "converting" in msg.lower():
+                 tasks[self.task_id]['message'] = msg # Show merge/convert status
             if not any(x in msg for x in ['[debug] ', 'Fetching', 'Invoking']):
                  tasks[self.task_id]['logs'].append(msg)
 
@@ -117,16 +117,13 @@ def run_download(url, task_id, fmt='video', qual='best'):
     os.makedirs(task_dir, exist_ok=True)
     
     # ---------------------------------------------------------
-    # FEATURE: URL Normalization for XHamster Mirrors
-    # Converts mirrors (xhamster1.desi) to canonical (xhamster.com)
-    # This invokes the robust XHamsterIE instead of generic extraction.
+    # FEATURE: URL Normalization
     # ---------------------------------------------------------
     if 'xhamster' in url.lower() and '.com' not in url.lower():
         try:
             parsed = urlparse(url)
             if 'xhamster' in parsed.netloc:
                  new_netloc = 'xhamster.com'
-                 # Reconstruct URL
                  url = urlunparse(parsed._replace(netloc=new_netloc))
                  tasks[task_id]['logs'].append(f"Redirecting mirror to canonical: {url}")
         except:
@@ -144,24 +141,21 @@ def run_download(url, task_id, fmt='video', qual='best'):
         # Robust Network Options
         'socket_timeout': 30,
         'retries': 20,
-        'file_access_retries': 5,
         'fragment_retries': 20,
-        'skip_unavailable_fragments': False,
         
         # Privacy / Anti-Block
         'geo_bypass': True,
         'source_address': '0.0.0.0', 
         
-        # Output
+        # Output configuration
         'noplaylist': True,
-        'restrictfilenames': True,   # Avoid special chars in filename
+        'restrictfilenames': True,
         'windowsfilenames': True,
         
         # Headers
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
             'Referer': get_referer(url)
         }
     }
@@ -175,11 +169,9 @@ def run_download(url, task_id, fmt='video', qual='best'):
             'preferredquality': '192',
         }]
     else:
-        # Video Quality Logic
         if qual == 'best':
             ydl_opts['format'] = 'bestvideo+bestaudio/best'
         else:
-            # Try to get close to target height, fallback to best
             try:
                 h = int(qual)
                 ydl_opts['format'] = f'bestvideo[height<={h}]+bestaudio/best[height<={h}]/best'
@@ -189,23 +181,29 @@ def run_download(url, task_id, fmt='video', qual='best'):
     # Attempt Download
     try:
         # 1. First Attempt: Standard
+        logger.info(f"Task {task_id}: Starting {url}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(url, download=True)
             
     except Exception as e:
         tasks[task_id]['logs'].append(f"Standard download failed: {str(e)}")
+        logger.error(f"Task {task_id} failed first attempt: {e}")
         
-        # 2. Retry Logic specifically for XHamster/Others that might need it
-        # Sometimes switching UA or using 'impersonate' (if available via plugin) helps
-        # For now, we perform a retry with stricter format backup
-        
+        # 2. Retry Logic
         tasks[task_id]['message'] = 'Retrying with backup options...'
-        ydl_opts['format'] = 'best' # Fallback to single file if merge failed
+        
+        # Force single file to avoid merge issues on low-resource envs
+        ydl_opts['format'] = 'best' 
+        ydl_opts['verbose'] = True
         
         try:
              with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(url, download=True)
         except Exception as retry_e:
+            logger.error(f"Task {task_id} retry failed: {retry_e}")
+            # Show actual error to user
+            clean_err = str(retry_e).replace("ERROR: ", "")
+            tasks[task_id]['message'] = f"Failed: {clean_err[:40]}..."
             tasks[task_id]['error'] = str(retry_e)
             tasks[task_id]['status'] = 'error'
             return
@@ -215,15 +213,13 @@ def run_download(url, task_id, fmt='video', qual='best'):
         # Identify downloaded file
         files = [f for f in os.listdir(task_dir) if not f.endswith('.part') and not f.endswith('.ytdl')]
         if not files:
-            raise Exception("No file found after download")
+            raise Exception("No file found. Download might have failed silently.")
             
-        # Pick the most recent/largest file
-        downloaded_file = files[0] # Usually only one
+        downloaded_file = files[0]
         
-        # Move to permanent download folder
         final_path = os.path.join(DOWNLOAD_DIR, f"{task_id}_{downloaded_file}")
         shutil.move(os.path.join(task_dir, downloaded_file), final_path)
-        shutil.rmtree(task_dir) # Clean temp
+        shutil.rmtree(task_dir) 
         
         tasks[task_id]['status'] = 'ready'
         tasks[task_id]['filename'] = downloaded_file
@@ -232,7 +228,9 @@ def run_download(url, task_id, fmt='video', qual='best'):
         
     except Exception as e:
         tasks[task_id]['status'] = 'error'
+        tasks[task_id]['message'] = f"Error processing file: {str(e)[:40]}..."
         tasks[task_id]['error'] = f"File processing error: {str(e)}"
+        logger.error(f"File error {task_id}: {e}")
 
 
 # --- Routes ---
@@ -242,7 +240,7 @@ def home():
     return jsonify({
         "status": "online",
         "service": "VidGrab Backend",
-        "version": "2.0.0"
+        "version": "2.1.0"
     })
 
 @app.route('/status/test')
@@ -265,13 +263,12 @@ def start_download():
         'status': 'queued',
         'progress': 0,
         'logs': [],
+        'message': 'Queued...',
         'created_at': time.time()
     }
     
-    # Run in background thread
     threading.Thread(target=run_download, args=(url, task_id, fmt, qual)).start()
     
-    # Clean up old tasks periodically
     if random.random() < 0.1:
         threading.Thread(target=clean_old_files).start()
         
@@ -294,6 +291,5 @@ def get_file(task_id):
     return send_file(file_path, as_attachment=True, download_name=filename)
 
 if __name__ == '__main__':
-    # Default port 10000 for Render, 5000 for local
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
