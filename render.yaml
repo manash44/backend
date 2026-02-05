@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: xhmaster-backend
+    env: docker
+    plan: free
+    region: oregon
+    buildCommand: docker build -t xhmaster-backend .
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 300 app:app
+    envVars:
+      - key: PORT
+        value: 10000
+    disk:
+      mountPath: /tmp/vidgrab_downloads
+      name: downloads-cache
+      sizeGB: 1

@@ -1,0 +1,6 @@
+flask
+flask-cors
+yt-dlp
+curl-cffi
+pyngrok
+gunicorn

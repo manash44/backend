@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Frontend (Separate Repo)
+frontend/
+
+# Dependencies
+node_modules/
+
+# Binaries
+ffmpeg.exe
+ffprobe.exe
+*.exe
+
+# Environment variables
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
