@@ -23,7 +23,8 @@ CORS(app)
 # Directories
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads')
-TEMP_DIR = os.path.join(BASE_DIR, 'temp')
+# Use /tmp for temporary files if available (better for containerized envs)
+TEMP_DIR = '/tmp/vidgetnow_downloads' if os.path.exists('/tmp') else os.path.join(BASE_DIR, 'temp')
 
 for d in [DOWNLOAD_DIR, TEMP_DIR]:
     os.makedirs(d, exist_ok=True)
@@ -158,6 +159,7 @@ def run_download(url, task_id, fmt='video', qual='best'):
         'noplaylist': True,
         'restrictfilenames': True,
         'windowsfilenames': True,
+        'overwrites': True,
         
         # Headers
         'http_headers': {
@@ -194,6 +196,8 @@ def run_download(url, task_id, fmt='video', qual='best'):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(url, download=True)
             
+        tasks[task_id]['message'] = 'Download complete. Finalizing...'
+            
     except Exception as e:
         tasks[task_id]['logs'].append(f"Standard download failed: {str(e)}")
         logger.error(f"Task {task_id} failed first attempt: {e}")
@@ -209,6 +213,7 @@ def run_download(url, task_id, fmt='video', qual='best'):
         try:
              with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(url, download=True)
+             tasks[task_id]['message'] = 'Retry complete. Finalizing...'
         except Exception as retry_e:
             logger.error(f"Task {task_id} retry failed: {retry_e}")
             # Show actual error to user
@@ -220,10 +225,22 @@ def run_download(url, task_id, fmt='video', qual='best'):
 
     # Success Handling
     try:
-        # Identify downloaded file
-        files = [f for f in os.listdir(task_dir) if not f.endswith('.part') and not f.endswith('.ytdl')]
+        # Wait a moment for file system to sync
+        time.sleep(1)
+        
+        # Identify downloaded file with retries
+        files = []
+        for _ in range(3):
+            files = [f for f in os.listdir(task_dir) if not f.endswith('.part') and not f.endswith('.ytdl')]
+            if files:
+                break
+            time.sleep(1)
+            
         if not files:
-            raise Exception("No file found. Download might have failed silently.")
+            # Last ditch effort: look for ANY file
+            files = [f for f in os.listdir(task_dir)]
+            if not files:
+                 raise Exception("No file found after download.")
             
         # Pick largest file (in case of detached audio/video parts)
         files.sort(key=lambda x: os.path.getsize(os.path.join(task_dir, x)), reverse=True)
@@ -231,7 +248,12 @@ def run_download(url, task_id, fmt='video', qual='best'):
         
         final_path = os.path.join(DOWNLOAD_DIR, f"{task_id}_{downloaded_file}")
         shutil.move(os.path.join(task_dir, downloaded_file), final_path)
-        shutil.rmtree(task_dir) 
+        
+        # Cleanup
+        try:
+            shutil.rmtree(task_dir) 
+        except:
+            pass
         
         tasks[task_id]['status'] = 'ready'
         tasks[task_id]['filename'] = downloaded_file
