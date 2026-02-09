@@ -165,9 +165,19 @@ def run_download(url, task_id, fmt='video', qual='best'):
         'http_headers': {
             'User-Agent': random.choice(USER_AGENTS),
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
             'Referer': get_referer(url)
-        }
+        },
+        
+        # Cookies for age verification (helps with adult sites)
+        'cookiesfrombrowser': None,  # Don't use browser cookies
     }
+    
+    # Add age verification cookies for adult content sites
+    if any(site in url.lower() for site in ['xhamster', 'xvideos', 'pornhub', 'redtube', 'youporn']):
+        # These cookies bypass age gates
+        ydl_opts['http_headers']['Cookie'] = 'age_verified=1; hasVisited=1; accessAgeDisclaimerPH=1; accessPH=1'
 
     # Format Selection
     if fmt == 'audio':
@@ -192,15 +202,17 @@ def run_download(url, task_id, fmt='video', qual='best'):
     # Attempt Download
     try:
         # 1. First Attempt: Standard
-        logger.info(f"Task {task_id}: Starting {url}")
+        logger.info(f"Task {task_id}: Starting download for {url}")
+        logger.info(f"Task {task_id}: Format={fmt}, Quality={qual}")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(url, download=True)
             
         tasks[task_id]['message'] = 'Download complete. Finalizing...'
             
     except Exception as e:
-        tasks[task_id]['logs'].append(f"Standard download failed: {str(e)}")
-        logger.error(f"Task {task_id} failed first attempt: {e}")
+        error_msg = str(e)
+        tasks[task_id]['logs'].append(f"Standard download failed: {error_msg}")
+        logger.error(f"Task {task_id} failed first attempt: {error_msg}")
         
         # 2. Retry Logic
         tasks[task_id]['message'] = 'Retrying with backup options...'
@@ -218,7 +230,7 @@ def run_download(url, task_id, fmt='video', qual='best'):
             logger.error(f"Task {task_id} retry failed: {retry_e}")
             # Show actual error to user
             clean_err = str(retry_e).replace("ERROR: ", "")
-            tasks[task_id]['message'] = f"Failed: {clean_err[:40]}..."
+            tasks[task_id]['message'] = f"Failed: {clean_err[:150]}..." if len(clean_err) > 150 else f"Failed: {clean_err}"
             tasks[task_id]['error'] = str(retry_e)
             tasks[task_id]['status'] = 'error'
             return
@@ -262,7 +274,8 @@ def run_download(url, task_id, fmt='video', qual='best'):
         
     except Exception as e:
         tasks[task_id]['status'] = 'error'
-        tasks[task_id]['message'] = f"Error processing file: {str(e)[:40]}..."
+        err_msg = str(e)
+        tasks[task_id]['message'] = f"Error processing file: {err_msg[:150]}..." if len(err_msg) > 150 else f"Error processing file: {err_msg}"
         tasks[task_id]['error'] = f"File processing error: {str(e)}"
         logger.error(f"File error {task_id}: {e}")
 
