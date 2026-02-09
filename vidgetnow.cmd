@@ -1,11 +1,11 @@
 @echo off
 cd /d "%~dp0"
-title VidGrab Launcher
+title VidGetNow Launcher
 
 :MENU
 cls
 echo ==========================================
-echo        VidGrab - Video Downloader
+echo        VidGetNow - Video Downloader
 echo ==========================================
 echo.
 echo  1. Run App (Local Network Only)
@@ -63,7 +63,7 @@ cls
 echo Starting Development Services...
 echo.
 echo [1/2] Starting Backend (New Window)...
-start "VidGrab Backend" cmd /c "cd /d "%~dp0" && py -3.13 app.py"
+start "VidGetNow Backend" cmd /c "cd /d "%~dp0" && py -3.13 app.py"
 echo.
 echo [2/2] Starting Frontend Dev Server...
 cd frontend

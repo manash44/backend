@@ -10,6 +10,6 @@ services:
       - key: PORT
         value: 10000
     disk:
-      mountPath: /tmp/vidgrab_downloads
+      mountPath: /tmp/vidgetnow_downloads
       name: downloads-cache
       sizeGB: 1

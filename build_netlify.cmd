@@ -3,7 +3,7 @@ cd /d "%~dp0"
 title Butilding for Netlify...
 
 echo ==========================================
-echo        VidGrab Netlify Builder
+echo        VidGetNow Netlify Builder
 echo ==========================================
 echo.
 echo  1. Installing Dependencies...

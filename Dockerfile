@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir -U --force-reinstall https://github.com/yt-dlp/yt
 COPY . .
 
 # Create temp directory for downloads
-RUN mkdir -p /tmp/vidgrab_downloads && chmod 777 /tmp/vidgrab_downloads
+RUN mkdir -p /tmp/vidgetnow_downloads && chmod 777 /tmp/vidgetnow_downloads
 
 # Environment variables
 ENV PORT=5000

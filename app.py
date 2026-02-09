@@ -246,7 +246,7 @@ def run_download(url, task_id, fmt='video', qual='best'):
 def home():
     return jsonify({
         "status": "online",
-        "service": "VidGrab Backend",
+        "service": "VidGetNow Backend",
         "version": "2.1.0"
     })
 

@@ -1,6 +1,6 @@
-# Building VidGrab Android APK
+# Building VidGetNow Android APK
 
-This guide explains how to build the VidGrab Android APK from source.
+This guide explains how to build the VidGetNow Android APK from source.
 
 ## Prerequisites
 
@@ -49,7 +49,7 @@ For a release build that can be distributed:
 ### 1. Create a Signing Key
 
 ```bash
-keytool -genkey -v -keystore vidgrab-release.keystore -alias vidgrab -keyalg RSA -keysize 2048 -validity 10000
+keytool -genkey -v -keystore vidgetnow-release.keystore -alias vidgetnow -keyalg RSA -keysize 2048 -validity 10000
 ```
 
 ### 2. Configure Signing in Android Studio
@@ -71,7 +71,7 @@ frontend/android/app/release/app-release.apk
 ### Option A: Same WiFi Network (Local Mode)
 
 #### On Your PC (Server)
-1. Run the VidGrab server:
+1. Run the VidGetNow server:
    ```bash
    python app.py
    ```
@@ -80,7 +80,7 @@ frontend/android/app/release/app-release.apk
 #### On Your Android Phone
 1. Transfer the APK to your phone
 2. Install it (you may need to enable "Install from unknown sources")
-3. Open VidGrab app
+3. Open VidGetNow app
 4. Tap the **Settings** icon (⚙️) in the top-right corner
 5. Enter your PC's IP and port: `192.168.1.100:5000`
 6. Tap **Save & Connect**
@@ -136,7 +136,7 @@ This allows your phone to connect from **anywhere** - different WiFi, mobile dat
 
 Run this in Command Prompt (Admin) to allow port 5000:
 ```cmd
-netsh advfirewall firewall add rule name="VidGrab" dir=in action=allow protocol=TCP localport=5000
+netsh advfirewall firewall add rule name="VidGetNow" dir=in action=allow protocol=TCP localport=5000
 ```
 
 ## Development Commands
