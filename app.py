@@ -177,13 +177,15 @@ def run_download(url, task_id, fmt='video', qual='best'):
         }]
     else:
         if qual == 'best':
-            ydl_opts['format'] = 'bestvideo+bestaudio/best'
+            # Prefer single file (no merge) to reduce server CPU usage
+            ydl_opts['format'] = 'best[ext=mp4]/bestvideo+bestaudio/best'
         else:
             try:
                 h = int(qual)
-                ydl_opts['format'] = f'bestvideo[height<={h}]+bestaudio/best[height<={h}]/best'
+                # Try single file first, then merge if needed
+                ydl_opts['format'] = f'best[ext=mp4][height<={h}]/bestvideo[height<={h}]+bestaudio/best[height<={h}]/best'
             except:
-                ydl_opts['format'] = 'bestvideo+bestaudio/best'
+                ydl_opts['format'] = 'best[ext=mp4]/bestvideo+bestaudio/best'
 
     # Attempt Download
     try:
