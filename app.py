@@ -106,6 +106,13 @@ def progress_hook(d, task_id):
                 pass
             tasks[task_id]['speed'] = d.get('_speed_str', 'N/A')
             tasks[task_id]['eta'] = d.get('_eta_str', 'N/A')
+            
+            # Capture size if available
+            if d.get('_total_bytes_str'):
+                tasks[task_id]['size'] = d.get('_total_bytes_str')
+            elif d.get('_total_bytes_estimate_str'):
+                tasks[task_id]['size'] = d.get('_total_bytes_estimate_str')
+                
             tasks[task_id]['status'] = 'downloading'
             
         elif d['status'] == 'finished':
