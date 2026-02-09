@@ -200,7 +200,8 @@ def run_download(url, task_id, fmt='video', qual='best'):
         tasks[task_id]['message'] = 'Retrying with backup options...'
         
         # Force single file to avoid merge issues on low-resource envs
-        ydl_opts['format'] = 'best' 
+        # Prefer pre-merged mp4, or just best available single file
+        ydl_opts['format'] = 'best[ext=mp4]/best' 
         ydl_opts['verbose'] = True
         
         try:
@@ -222,6 +223,8 @@ def run_download(url, task_id, fmt='video', qual='best'):
         if not files:
             raise Exception("No file found. Download might have failed silently.")
             
+        # Pick largest file (in case of detached audio/video parts)
+        files.sort(key=lambda x: os.path.getsize(os.path.join(task_dir, x)), reverse=True)
         downloaded_file = files[0]
         
         final_path = os.path.join(DOWNLOAD_DIR, f"{task_id}_{downloaded_file}")
