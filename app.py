@@ -8,12 +8,13 @@ import shutil
 import threading
 import time
 import uuid
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import ParseResult, urlparse, urlunparse
 
 from flask import Flask, request, jsonify, send_file  # type: ignore
 from flask_cors import CORS  # type: ignore
-import yt_dlp  # type: ignore
+# yt-dlp imported lazily in run_download for faster startup
 
 # Configure logging
 logging.basicConfig(
@@ -148,7 +149,10 @@ class MyLogger:
 def progress_hook(d: Dict[str, Any], task_id: str) -> None:
     if task_id in tasks:
         if d["status"] == "downloading":
-            p = str(d.get("_percent_str", "0%")).replace("%", "")
+            p_str = str(d.get("_percent_str", "0%"))
+            # Remove ANSI color codes that yt-dlp might output
+            p_str = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', p_str)
+            p = p_str.replace("%", "").strip()
             try:
                 tasks[task_id]["progress"] = float(p)
             except Exception:
@@ -200,10 +204,11 @@ def run_download(
 
     url = _normalize_url(url, task_id)
 
+    import yt_dlp  # type: ignore
     tasks[task_id]["message"] = "Initializing downloader..."
 
     try:
-        import imageio_ffmpeg
+        import imageio_ffmpeg  # type: ignore
         ffmpeg_loc = imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
         ffmpeg_loc = (
@@ -215,10 +220,11 @@ def run_download(
         "outtmpl": os.path.join(task_dir, "%(title)s.%(ext)s"),
         "progress_hooks": [lambda d: progress_hook(d, task_id)],
         "logger": MyLogger(task_id),
+        "color": "no_color",
         # Robust Network Options
-        "socket_timeout": 15,
-        "retries": 3,
-        "fragment_retries": 3,
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
         "concurrent_fragment_downloads": 5,
         # Privacy / Anti-Block
         "geo_bypass": True,
@@ -336,7 +342,7 @@ def run_download(
 
         # Identify downloaded file with retries
         ready_files: List[str] = []
-        for _ in range(3):
+        for _ in range(10):
             ready_files = [
                 f
                 for f in os.listdir(task_dir)

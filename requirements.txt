@@ -1,7 +1,6 @@
 flask
 flask-cors
 yt-dlp>=2026.03.17
-curl-cffi
-pyngrok
+
 gunicorn
 imageio-ffmpeg
