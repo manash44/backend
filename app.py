@@ -305,8 +305,11 @@ def run_download(
     if cookies_path:
         ydl_opts["cookiefile"] = cookies_path
 
-    if browser_cookie and browser_cookie.lower() != "none":
-        ydl_opts["cookiesfrombrowser"] = (browser_cookie.lower(),)
+    # Do not attempt to extract local browser cookies if running on a cloud server like Render.
+    if browser_cookie and browser_cookie.lower() != "none" and not os.environ.get("RENDER"):
+        # Only use browser cookies for YouTube to prevent breaking other extractors
+        if "youtube.com" in url.lower() or "youtu.be" in url.lower():
+            ydl_opts["cookiesfrombrowser"] = (browser_cookie.lower(),)
 
     if "youtube.com" in url.lower() or "youtu.be" in url.lower():
         if not browser_cookie or browser_cookie.lower() == "none":
