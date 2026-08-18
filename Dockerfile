@@ -3,7 +3,6 @@ FROM python:3.11-slim
 # Install system dependencies (FFmpeg is required)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -14,10 +13,6 @@ COPY requirements.txt .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install latest yt-dlp from master to ensure frequent updates work
-# This overwrites the one from requirements.txt if needed
-RUN pip install --no-cache-dir -U --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
 
 # Copy application code
 COPY . .

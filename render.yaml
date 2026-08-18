@@ -1,15 +1,12 @@
 services:
   - type: web
-    name: xhmaster-backend
+    name: vidgetnow-backend
     env: docker
     plan: free
     region: oregon
-    buildCommand: docker build -t xhmaster-backend .
+    buildCommand: docker build -t vidgetnow-backend .
     startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 300 app:app
+    healthCheckPath: /health
     envVars:
       - key: PORT
         value: 10000
-    disk:
-      mountPath: /tmp/vidgetnow_downloads
-      name: downloads-cache
-      sizeGB: 1

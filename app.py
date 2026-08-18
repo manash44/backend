@@ -1,4 +1,5 @@
 # flake8: noqa: E501
+import base64
 import itertools
 import logging
 import math
@@ -9,12 +10,12 @@ import threading
 import time
 import uuid
 import re
+import concurrent.futures
 from typing import Any, Dict, List, Optional
 from urllib.parse import ParseResult, urlparse, urlunparse
 
 from flask import Flask, request, jsonify, send_file  # type: ignore
 from flask_cors import CORS  # type: ignore
-# yt-dlp imported lazily in run_download for faster startup
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +45,9 @@ tasks: Dict[str, Any] = {}
 # --- Optimization helper for background cleanup ---
 last_cleanup: float = 0.0
 cleanup_lock = threading.Lock()
+
+# Global thread pool to ensure tasks are downloaded one by one
+download_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 # --- Helper Functions ---
 
@@ -122,6 +126,65 @@ def get_referer(url: str) -> str:
         return "https://www.google.com/"
 
 
+def get_cookiefile() -> Optional[str]:
+    """Return a cookies.txt path from disk or Render environment variables."""
+    explicit_path = os.environ.get("YTDLP_COOKIES_FILE")
+    if explicit_path and os.path.exists(explicit_path):
+        return explicit_path
+
+    repo_cookies = os.path.join(BASE_DIR, "cookies.txt")
+    if os.path.exists(repo_cookies):
+        return repo_cookies
+
+    cookie_text = os.environ.get("YTDLP_COOKIES", "")
+    cookie_b64 = os.environ.get("YTDLP_COOKIES_B64", "")
+    if cookie_b64:
+        try:
+            cookie_text = base64.b64decode(cookie_b64).decode("utf-8")
+        except Exception:
+            logger.warning("YTDLP_COOKIES_B64 could not be decoded")
+            cookie_text = ""
+
+    if cookie_text.strip():
+        env_cookie_path = os.path.join(TEMP_DIR, "cookies.txt")
+        with open(env_cookie_path, "w", encoding="utf-8") as f:
+            f.write(cookie_text)
+        return env_cookie_path
+
+    return None
+
+
+def is_valid_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    except Exception:
+        return False
+
+
+def friendly_download_error(error: Exception) -> str:
+    raw = str(error).replace("ERROR: ", "").strip()
+    lower = raw.lower()
+
+    if "http error 429" in lower or "too many requests" in lower:
+        return (
+            "This site is rate-limiting the server. For YouTube, add a fresh "
+            "cookies.txt file to the backend or try again later."
+        )
+    if "sign in to confirm" in lower or "confirm you're not a bot" in lower:
+        return (
+            "YouTube requires verification. Make sure you are logged into YouTube in your browser, "
+            "or close your browser if the cookies are locked."
+        )
+    if "could not copy chrome cookie database" in lower or "permission denied" in lower and "cookies" in lower:
+        return "Your browser is locking its cookies. Please fully close Chrome/Edge and try again, or use a different browser in Settings."
+    if "unsupported url" in lower:
+        return "This URL is not supported by the downloader."
+
+    truncated = _truncate(raw, 180)
+    return "Failed: " + truncated + ("..." if len(raw) > 180 else "")
+
+
 # --- Core Downloader Logic ---
 
 
@@ -175,45 +238,37 @@ def progress_hook(d: Dict[str, Any], task_id: str) -> None:
 
 def _normalize_url(url: str, task_id: str) -> str:
     """Normalize xhamster mirror URLs to the canonical domain."""
-    if "xhamster" in url.lower() and ".com" not in url.lower():
-        try:
-            parsed: ParseResult = urlparse(url)
-            if "xhamster" in parsed.netloc:
-                normalized = urlunparse((
-                    parsed.scheme,
-                    "xhamster.com",
-                    parsed.path,
-                    parsed.params,
-                    parsed.query,
-                    parsed.fragment,
-                ))
-                tasks[task_id]["logs"].append(
-                    "Redirecting mirror to canonical: " + normalized
-                )
-                return normalized
-        except Exception:
-            pass
+    # Disabling normalization as mirrors often work better than the canonical domain
+    # depending on regional blocking. yt-dlp handles most mirrors natively.
     return url
 
 
 def run_download(
-    url: str, task_id: str, fmt: str = "video", qual: str = "best"
+    url: str, task_id: str, fmt: str = "video", qual: str = "best", browser_cookie: str = ""
 ) -> None:
     task_dir = os.path.join(TEMP_DIR, task_id)
     os.makedirs(task_dir, exist_ok=True)
 
     url = _normalize_url(url, task_id)
 
-    import yt_dlp  # type: ignore
     tasks[task_id]["message"] = "Initializing downloader..."
+
+    try:
+        import yt_dlp  # type: ignore
+    except Exception as e:
+        tasks[task_id]["status"] = "error"
+        tasks[task_id]["message"] = "Downloader dependency failed to load."
+        tasks[task_id]["error"] = str(e)
+        logger.exception("yt-dlp import failed")
+        return
 
     try:
         import imageio_ffmpeg  # type: ignore
         ffmpeg_loc = imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
-        ffmpeg_loc = (
-            BASE_DIR if os.path.exists(os.path.join(BASE_DIR, "ffmpeg.exe")) else None
-        )
+        ffmpeg_loc = os.path.join(BASE_DIR, "ffmpeg.exe")
+        if not os.path.exists(ffmpeg_loc):
+            ffmpeg_loc = None
 
     ydl_opts: Dict[str, Any] = {
         "ffmpeg_location": ffmpeg_loc,
@@ -230,7 +285,7 @@ def run_download(
         "geo_bypass": True,
         "source_address": "0.0.0.0",
         # Output configuration
-        "noplaylist": True,
+        "noplaylist": not any(x in url.lower() for x in ["instagram.com", "twitter.com", "x.com"]),
         "restrictfilenames": True,
         "windowsfilenames": True,
         "overwrites": True,
@@ -246,17 +301,31 @@ def run_download(
 
     # --- YouTube-specific options ---
     # Optional: Use cookies.txt if it exists to bypass bot protection reliably
-    cookies_path = os.path.join(BASE_DIR, "cookies.txt")
-    if os.path.exists(cookies_path):
+    cookies_path = get_cookiefile()
+    if cookies_path:
         ydl_opts["cookiefile"] = cookies_path
 
+    if browser_cookie and browser_cookie.lower() != "none":
+        ydl_opts["cookiesfrombrowser"] = (browser_cookie.lower(),)
+
     if "youtube.com" in url.lower() or "youtu.be" in url.lower():
-        # Avoid locking issues with browser cookies by using robust player clients
-        ydl_opts["extractor_args"] = {
-            "youtube": {
-                "player_client": ["tv", "web_safari", "ios", "default"],
+        if not browser_cookie or browser_cookie.lower() == "none":
+            # Avoid locking issues with browser cookies by using robust player clients
+            # ONLY if we aren't explicitly trying to pass desktop browser cookies.
+            ydl_opts["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["tv", "web_safari", "ios", "default"],
+                }
             }
-        }
+
+    # Enable browser impersonation for Facebook and Instagram to bypass blocks
+    if "facebook.com" in url.lower() or "fb.watch" in url.lower() or "instagram.com" in url.lower():
+        # Requires curl_cffi installed
+        ydl_opts["impersonate"] = "chrome"
+        if "facebook" in url.lower() or "fb.watch" in url.lower():
+            if "extractor_args" not in ydl_opts:
+                ydl_opts["extractor_args"] = {}
+            ydl_opts["extractor_args"]["facebook"] = {"api": ["graphql"]}
 
     # Add age verification cookies for adult content sites
     if any(
@@ -278,18 +347,20 @@ def run_download(
             }
         ]
     else:
+        ext = fmt if fmt in ["mp4", "webm", "mkv", "flv"] else "mp4"
         if qual == "best":
-            # Prefer single file (no merge) to reduce server CPU usage
-            ydl_opts["format"] = "best[ext=mp4]/bestvideo+bestaudio/best"
+            # Prefer single file (no merge) or specific extension
+            ydl_opts["format"] = f"best[ext={ext}]/bestvideo[ext={ext}]+bestaudio/bestvideo+bestaudio/best"
         else:
             try:
                 h = int(qual)
-                # Try single file first, then merge if needed
+                # Try single file first, then merge if needed, fallback to any extension
                 ydl_opts["format"] = (
-                    "best[ext=mp4][height<=%d]/bestvideo[height<=%d]+bestaudio/best[height<=%d]/best" % (h, h, h)
+                    f"best[ext={ext}][height<={h}]/bestvideo[ext={ext}][height<={h}]+bestaudio/"
+                    f"best[height<={h}]/bestvideo[height<={h}]+bestaudio/best"
                 )
             except Exception:
-                ydl_opts["format"] = "best[ext=mp4]/bestvideo+bestaudio/best"
+                ydl_opts["format"] = f"best[ext={ext}]/bestvideo+bestaudio/best"
 
     # Attempt Download
     try:
@@ -311,11 +382,12 @@ def run_download(
 
         # Force single file to avoid merge issues on low-resource envs
         if fmt == "audio":
-            ydl_opts["format"] = "bestaudio[ext=m4a]/bestaudio/best"
+            ydl_opts["format"] = "bestaudio[ext=m4a]/bestaudio[ext=aac]/m4a/best"
             if "postprocessors" in ydl_opts:
                 del ydl_opts["postprocessors"]
         else:
-            ydl_opts["format"] = "best[ext=mp4]/best"
+            ext = fmt if fmt in ["mp4", "webm", "mkv", "flv"] else "mp4"
+            ydl_opts["format"] = f"best[ext={ext}]/best"
 
         ydl_opts["verbose"] = True
 
@@ -325,12 +397,7 @@ def run_download(
             tasks[task_id]["message"] = "Retry complete. Finalizing..."
         except Exception as retry_e:
             logger.error("Task %s retry failed: %s", task_id, retry_e)
-            clean_err = str(retry_e).replace("ERROR: ", "")
-            truncated = _truncate(clean_err, 150)
-            if len(clean_err) > 150:
-                tasks[task_id]["message"] = "Failed: " + truncated + "..."
-            else:
-                tasks[task_id]["message"] = "Failed: " + clean_err
+            tasks[task_id]["message"] = friendly_download_error(retry_e)
             tasks[task_id]["error"] = str(retry_e)
             tasks[task_id]["status"] = "error"
             return
@@ -358,14 +425,23 @@ def run_download(
             if not ready_files:
                 raise RuntimeError("No file found after download.")
 
-        # Pick largest file (in case of detached audio/video parts)
-        ready_files.sort(
-            key=lambda x: os.path.getsize(os.path.join(task_dir, x)), reverse=True
-        )
-        downloaded_file = ready_files[0]
-
-        final_path = os.path.join(DOWNLOAD_DIR, task_id + "_" + downloaded_file)
-        shutil.move(os.path.join(task_dir, downloaded_file), final_path)
+        if len(ready_files) > 1:
+            import zipfile
+            tasks[task_id]["message"] = f"Zipping {len(ready_files)} files..."
+            zip_filename = "gallery.zip"
+            final_path = os.path.join(DOWNLOAD_DIR, task_id + "_" + zip_filename)
+            with zipfile.ZipFile(final_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for f in ready_files:
+                    zipf.write(os.path.join(task_dir, f), f)
+            downloaded_file = zip_filename
+        else:
+            # Pick largest file (in case of detached audio/video parts)
+            ready_files.sort(
+                key=lambda x: os.path.getsize(os.path.join(task_dir, x)), reverse=True
+            )
+            downloaded_file = ready_files[0]
+            final_path = os.path.join(DOWNLOAD_DIR, task_id + "_" + downloaded_file)
+            shutil.move(os.path.join(task_dir, downloaded_file), final_path)
 
         tasks[task_id]["status"] = "ready"
         tasks[task_id]["filename"] = downloaded_file
@@ -396,24 +472,30 @@ def run_download(
 @app.route("/")
 def home() -> Any:
     return jsonify(
-        {"status": "online", "service": "VidGetNow Backend", "version": "2.1.0"}
+        {"status": "online", "service": "VidGetNow Backend", "version": "2.2.1"}
     )
 
 
+@app.route("/health")
+@app.route("/api/status/test")
 @app.route("/status/test")
 def status_test() -> Any:
     return jsonify({"status": "ok"}), 200
 
 
+@app.route("/api/download", methods=["POST"])
 @app.route("/download", methods=["POST"])
 def start_download() -> Any:
     data: Dict[str, Any] = request.json or {}
-    url = str(data.get("url", ""))
+    url = str(data.get("url", "")).strip()
     fmt = str(data.get("format", "video"))
     qual = str(data.get("quality", "best"))
+    browser_cookie = str(data.get("browserCookie", ""))
 
     if not url:
         return jsonify({"error": "No URL provided"}), 400
+    if not is_valid_url(url):
+        return jsonify({"error": "Enter a valid http or https video URL"}), 400
 
     task_id = str(uuid.uuid4())
     tasks[task_id] = {
@@ -421,18 +503,19 @@ def start_download() -> Any:
         "status": "queued",
         "progress": 0,
         "logs": [],
-        "message": "Queued...",
+        "message": "Waiting in queue...",
         "created_at": time.time(),
     }
 
-    threading.Thread(target=run_download, args=(url, task_id, fmt, qual)).start()
+    download_executor.submit(run_download, url, task_id, fmt, qual, browser_cookie)
 
     # Always clean old files to prevent disk usage buildup
-    threading.Thread(target=clean_old_files).start()
+    threading.Thread(target=clean_old_files, daemon=True).start()
 
     return jsonify({"task_id": task_id})
 
 
+@app.route("/api/status/<task_id>")
 @app.route("/status/<task_id>")
 def get_status(task_id: str) -> Any:
     if task_id not in tasks:
@@ -440,6 +523,7 @@ def get_status(task_id: str) -> Any:
     return jsonify(tasks[task_id])
 
 
+@app.route("/api/file/<task_id>")
 @app.route("/file/<task_id>")
 def get_file(task_id: str) -> Any:
     if task_id not in tasks or tasks[task_id].get("status") != "ready":
