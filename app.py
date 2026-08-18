@@ -180,6 +180,8 @@ def friendly_download_error(error: Exception) -> str:
         return "Your browser is locking its cookies. Please fully close Chrome/Edge and try again, or use a different browser in Settings."
     if "unsupported url" in lower:
         return "This URL is not supported by the downloader."
+    if "keyerror('videomodel')" in lower or "videomodel" in lower:
+        return "This adult site recently changed its layout. Our extractor is updating. Try a different site or check back soon."
 
     truncated = _truncate(raw, 180)
     return "Failed: " + truncated + ("..." if len(raw) > 180 else "")
