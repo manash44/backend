@@ -332,14 +332,7 @@ def run_download(
                 ydl_opts["extractor_args"] = {}
             ydl_opts["extractor_args"]["facebook"] = {"api": ["graphql"]}
 
-    # Add age verification cookies for adult content sites
-    if any(
-        site in url.lower()
-        for site in ["xhamster", "xvideos", "pornhub", "redtube", "youporn"]
-    ):
-        ydl_opts["http_headers"][
-            "Cookie"
-        ] = "age_verified=1; hasVisited=1; accessAgeDisclaimerPH=1; accessPH=1"
+
 
     # Format Selection
     if fmt == "audio":
