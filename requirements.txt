@@ -1,6 +1,6 @@
 flask
 flask-cors
-yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git@master
+yt-dlp
 curl_cffi
 
 gunicorn

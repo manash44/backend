@@ -314,14 +314,12 @@ def run_download(
             ydl_opts["cookiesfrombrowser"] = (browser_cookie.lower(),)
 
     if "youtube.com" in url.lower() or "youtu.be" in url.lower():
-        if not browser_cookie or browser_cookie.lower() == "none":
-            # Avoid locking issues with browser cookies by using robust player clients
-            # ONLY if we aren't explicitly trying to pass desktop browser cookies.
-            ydl_opts["extractor_args"] = {
-                "youtube": {
-                    "player_client": ["tv", "web_safari", "ios", "default"],
-                }
+        # Always use robust player clients to bypass bot verification blocks
+        ydl_opts["extractor_args"] = {
+            "youtube": {
+                "player_client": ["tv", "web_safari", "ios", "default"],
             }
+        }
 
     # Enable browser impersonation for Facebook and Instagram to bypass blocks
     if "facebook.com" in url.lower() or "fb.watch" in url.lower() or "instagram.com" in url.lower():
