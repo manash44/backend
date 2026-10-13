@@ -285,7 +285,6 @@ def run_download(
         "concurrent_fragment_downloads": 5,
         # Privacy / Anti-Block
         "geo_bypass": True,
-        "source_address": "0.0.0.0",
         # Output configuration
         "noplaylist": not any(x in url.lower() for x in ["instagram.com", "twitter.com", "x.com"]),
         "restrictfilenames": True,
@@ -335,11 +334,20 @@ def run_download(
     # Format Selection
     if fmt == "audio":
         ydl_opts["format"] = "bestaudio/best"
+        ydl_opts["writethumbnail"] = True
         ydl_opts["postprocessors"] = [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
                 "preferredquality": "192",
+            },
+            {
+                "key": "FFmpegMetadata",
+                "add_metadata": True,
+            },
+            {
+                "key": "EmbedThumbnail",
+                "already_have_thumbnail": False,
             }
         ]
     else:
@@ -381,6 +389,8 @@ def run_download(
             ydl_opts["format"] = "bestaudio[ext=m4a]/bestaudio[ext=aac]/m4a/best"
             if "postprocessors" in ydl_opts:
                 del ydl_opts["postprocessors"]
+            if "writethumbnail" in ydl_opts:
+                del ydl_opts["writethumbnail"]
         else:
             ext = fmt if fmt in ["mp4", "webm", "mkv", "flv"] else "mp4"
             ydl_opts["format"] = f"best[ext={ext}]/best"
@@ -421,7 +431,15 @@ def run_download(
             if not ready_files:
                 raise RuntimeError("No file found after download.")
 
-        if len(ready_files) > 1:
+        media_exts = (".mp4", ".mkv", ".webm", ".mp3", ".m4a", ".flac", ".wav", ".opus", ".ogg")
+        media_files = [f for f in ready_files if f.lower().endswith(media_exts)]
+
+        if len(media_files) == 1:
+            # Single audio or video file was produced (any other files like thumbnails or json are auxiliary)
+            downloaded_file = media_files[0]
+            final_path = os.path.join(DOWNLOAD_DIR, task_id + "_" + downloaded_file)
+            shutil.move(os.path.join(task_dir, downloaded_file), final_path)
+        elif len(ready_files) > 1:
             import zipfile
             tasks[task_id]["message"] = f"Zipping {len(ready_files)} files..."
             zip_filename = "gallery.zip"
