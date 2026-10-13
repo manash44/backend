@@ -395,6 +395,9 @@ def run_download(
             ext = fmt if fmt in ["mp4", "webm", "mkv", "flv"] else "mp4"
             ydl_opts["format"] = f"best[ext={ext}]/best"
 
+        if "cookiesfrombrowser" in ydl_opts:
+            del ydl_opts["cookiesfrombrowser"]
+
         ydl_opts["verbose"] = True
 
         try:
