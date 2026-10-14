@@ -181,10 +181,64 @@ def friendly_download_error(error: Exception) -> str:
     if "unsupported url" in lower:
         return "This URL is not supported by the downloader."
     if "keyerror('videomodel')" in lower or "videomodel" in lower:
-        return "This adult site recently changed its layout. Our extractor is updating. Try a different site or check back soon."
+        return "This site blocked cloud server IP or layout was protected. Run VidGetNow locally on your device (Option 1 in vidgetnow.cmd) for direct download."
+    if "403" in lower or "forbidden" in lower:
+        return "Access forbidden. Cloud server IP may be rate-limited or geo-blocked. Run locally for best results."
 
     truncated = _truncate(raw, 180)
     return "Failed: " + truncated + ("..." if len(raw) > 180 else "")
+
+
+# --- Safe Extractor Patches ---
+try:
+    import yt_dlp.extractor.xhamster as _xh
+    _orig_xh_real_extract = _xh.XHamsterIE._real_extract
+
+    def _patched_xh_real_extract(self: Any, url: str) -> Any:
+        try:
+            return _orig_xh_real_extract(self, url)
+        except Exception as e:
+            if "videoModel" in str(e) or isinstance(e, KeyError):
+                mobj = self._match_valid_url(url)
+                video_id = mobj.group("id") or mobj.group("id_2")
+                desktop_url = re.sub(r"^(https?://(?:.+?\.)?)m\.", r"\1", url)
+                webpage, urlh = self._download_webpage_handle(desktop_url, video_id, impersonate=True)
+                initials = self._parse_json(
+                    self._search_regex(
+                        (r"window\.initials\s*=\s*({.+?})\s*;\s*</script>",
+                         r"window\.initials\s*=\s*({.+?})\s*;"), webpage, "initials",
+                        default="{}"),
+                    video_id, fatal=False)
+                video = initials.get("videoModel") or initials.get("videoEntity") or initials.get("video") or {}
+                title = (
+                    video.get("title")
+                    or initials.get("videoTitle")
+                    or self._html_search_regex(r"<title>(.+?)</title>", webpage, "title", default=f"xhamster_{video_id}")
+                )
+                title = re.sub(r"\s*-\s*xHamster.*$", "", title, flags=re.IGNORECASE).strip()
+                formats = []
+                xplayer_sources = (initials.get("xplayerSettings") or {}).get("sources") or {}
+                hls = xplayer_sources.get("hls") or {}
+                hls_url = hls.get("url") or hls.get("fallback")
+                if hls_url:
+                    hls_url = self._decipher_format_url(hls_url, "hls")
+                    formats.extend(self._extract_m3u8_formats(hls_url, video_id, "mp4", entry_protocol="m3u8_native", m3u8_id="hls", fatal=False))
+                standard = xplayer_sources.get("standard") or {}
+                for key, flist in standard.items():
+                    if isinstance(flist, list):
+                        for fitem in flist:
+                            if isinstance(fitem, dict):
+                                surl = fitem.get("url") or fitem.get("fallback")
+                                if surl:
+                                    surl = self._decipher_format_url(surl, key)
+                                    formats.append({"format_id": key, "url": surl, "ext": "mp4"})
+                if formats:
+                    return {"id": video_id, "title": title, "formats": formats}
+            raise e
+
+    _xh.XHamsterIE._real_extract = _patched_xh_real_extract
+except Exception as _patch_err:
+    logger.warning("Could not patch XHamsterIE: %s", _patch_err)
 
 
 # --- Core Downloader Logic ---
@@ -329,7 +383,10 @@ def run_download(
                 ydl_opts["extractor_args"] = {}
             ydl_opts["extractor_args"]["facebook"] = {"api": ["graphql"]}
 
-
+    # Pass age verification cookies for adult domains to avoid age gate redirects
+    is_adult = any(x in url.lower() for x in ["xhamster", "pornhub", "redtube", "youporn", "xnxx", "xvideos"])
+    if is_adult:
+        ydl_opts["http_headers"]["Cookie"] = "age_verified=1; has_access=1; session_country=US; rta=1"
 
     # Format Selection
     if fmt == "audio":
@@ -400,9 +457,20 @@ def run_download(
 
         ydl_opts["verbose"] = True
 
+        # Check if URL was an xhamster mirror, try switching to canonical or vice-versa
+        retry_url = url
+        if "xhamster" in url.lower():
+            m = re.search(r'https?://(?:[^/?#]+\.)?(?:xhamster\d*|xhms|xhday|xhvid)\.(?:com|desi|one|pro)/(?:videos|movies)/(.+)', url, re.IGNORECASE)
+            if m:
+                if "xhamster.com" not in url.lower():
+                    retry_url = f"https://xhamster.com/{'videos' if '/videos/' in url else 'movies'}/{m.group(1)}"
+                else:
+                    retry_url = f"https://xhamster.desi/{'videos' if '/videos/' in url else 'movies'}/{m.group(1)}"
+                tasks[task_id]["logs"].append(f"Retrying with alternative domain: {retry_url}")
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.extract_info(url, download=True)
+                ydl.extract_info(retry_url, download=True)
             tasks[task_id]["message"] = "Retry complete. Finalizing..."
         except Exception as retry_e:
             logger.error("Task %s retry failed: %s", task_id, retry_e)
