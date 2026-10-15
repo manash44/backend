@@ -14,7 +14,7 @@ import concurrent.futures
 from typing import Any, Dict, List, Optional
 from urllib.parse import ParseResult, urlparse, urlunparse
 
-from flask import Flask, request, jsonify, send_file  # type: ignore
+from flask import Flask, request, jsonify, send_file, send_from_directory  # type: ignore
 from flask_cors import CORS  # type: ignore
 
 # Configure logging
@@ -35,6 +35,18 @@ TEMP_DIR = (
     else os.path.join(BASE_DIR, "temp")
 )
 DOWNLOAD_DIR = os.path.join(TEMP_DIR, "downloads_ready")
+
+# Detect static frontend build directory if running locally
+FRONTEND_DIST: Optional[str] = None
+for _cand in [
+    os.path.join(BASE_DIR, "..", "..", "vidgrab_frontend-main", "vidgrab_frontend-main", "dist"),
+    os.path.join(BASE_DIR, "dist"),
+    os.path.join(BASE_DIR, "frontend", "dist"),
+]:
+    _abs_cand = os.path.abspath(_cand)
+    if os.path.isdir(_abs_cand) and os.path.exists(os.path.join(_abs_cand, "index.html")):
+        FRONTEND_DIST = _abs_cand
+        break
 
 for _d in [DOWNLOAD_DIR, TEMP_DIR]:
     os.makedirs(_d, exist_ok=True)
@@ -200,6 +212,8 @@ try:
         except Exception as e:
             if "videoModel" in str(e) or isinstance(e, KeyError):
                 mobj = self._match_valid_url(url)
+                if not mobj:
+                    raise e
                 video_id = mobj.group("id") or mobj.group("id_2")
                 desktop_url = re.sub(r"^(https?://(?:.+?\.)?)m\.", r"\1", url)
                 webpage, urlh = self._download_webpage_handle(desktop_url, video_id, impersonate=True)
@@ -555,10 +569,36 @@ def run_download(
 
 
 @app.route("/")
+@app.route("/api")
 def home() -> Any:
+    if FRONTEND_DIST and os.path.exists(os.path.join(FRONTEND_DIST, "index.html")):
+        return send_from_directory(FRONTEND_DIST, "index.html")
     return jsonify(
         {"status": "online", "service": "VidGetNow Backend", "version": "2.2.1"}
     )
+
+
+@app.route("/assets/<path:filename>")
+def serve_assets(filename: str) -> Any:
+    if FRONTEND_DIST:
+        assets_dir = os.path.join(FRONTEND_DIST, "assets")
+        if os.path.exists(os.path.join(assets_dir, filename)):
+            return send_from_directory(assets_dir, filename)
+    return jsonify({"error": "Asset not found"}), 404
+
+
+@app.route("/<path:filename>")
+def serve_static_or_spa(filename: str) -> Any:
+    if filename.startswith(("api", "download", "status", "health", "file", "diagnose")):
+        return jsonify({"error": "Not found"}), 404
+    if FRONTEND_DIST:
+        target = os.path.join(FRONTEND_DIST, filename)
+        if os.path.isfile(target):
+            return send_from_directory(FRONTEND_DIST, filename)
+        index_file = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.isfile(index_file):
+            return send_from_directory(FRONTEND_DIST, "index.html")
+    return jsonify({"error": "Not found"}), 404
 
 
 @app.route("/health")
@@ -569,8 +609,9 @@ def status_test() -> Any:
 
 
 @app.route("/api/diagnose", methods=["GET"])
+@app.route("/diagnose", methods=["GET"])
 def diagnose() -> Any:
-    target_url = request.args.get("url", "https://xhamster46.desi/videos/police-wale-ne-soteli-bahan-ke-sath-rep-kar-diya-xhNaj7z")
+    target_url = request.args.get("url", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
     results: Dict[str, Any] = {}
     from curl_cffi import requests as cffi_requests
     import json

@@ -1,9 +1,10 @@
 FROM python:3.11-slim
 
-# Install system dependencies (FFmpeg is required)
+# Install system dependencies (FFmpeg is required, nodejs is required for yt-dlp JS challenge solver)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
+    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

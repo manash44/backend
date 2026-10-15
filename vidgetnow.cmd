@@ -1,6 +1,25 @@
 @echo off
+setlocal
 cd /d "%~dp0"
 title VidGetNow Launcher
+
+if exist "%~dp0venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
+) else (
+    where python >nul 2>nul
+    if not errorlevel 1 (
+        set "PYTHON_EXE=python"
+    ) else (
+        where py >nul 2>nul
+        if not errorlevel 1 (
+            set "PYTHON_EXE=py"
+        ) else (
+            echo [ERROR] Python not found in PATH or venv!
+            pause
+            exit /b 1
+        )
+    )
+)
 
 :MENU
 cls
@@ -38,19 +57,19 @@ goto MENU
 :RUN_LOCAL
 cls
 echo Starting Local Server...
+echo Access via http://localhost:5000
 echo Use Ctrl+C to stop.
 echo.
-py app.py
+"%PYTHON_EXE%" app.py
 pause
 goto MENU
-
 
 :RUN_DEV
 cls
 echo Starting Development Services...
 echo.
 echo [1/2] Starting Backend (New Window)...
-start "VidGetNow Backend" cmd /c "cd /d "%~dp0" && py app.py"
+start "VidGetNow Backend" cmd /c "cd /d "%~dp0" && "%PYTHON_EXE%" app.py"
 echo.
 echo [2/2] Starting Frontend Dev Server...
 cd ..\..\vidgrab_frontend-main\vidgrab_frontend-main
@@ -80,15 +99,16 @@ goto MENU
 cls
 echo Updating Dependencies...
 echo.
-echo [1/3] Uploading Pip...
-py -m pip install --upgrade pip
+echo [1/3] Upgrading Pip...
+"%PYTHON_EXE%" -m pip install --upgrade pip
 echo.
 echo [2/3] Installing/Updating core requirements...
-py -m pip install -r requirements.txt
+"%PYTHON_EXE%" -m pip install -r requirements.txt
 echo.
 echo [3/3] Installing latest yt-dlp (Master Branch)...
-py -m pip install -U --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
+"%PYTHON_EXE%" -m pip install -U --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
 echo.
 echo [SUCCESS] Dependencies updated!
 pause
 goto MENU
+
