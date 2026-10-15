@@ -595,7 +595,10 @@ def diagnose() -> Any:
             if m:
                 d = json.loads(m.group(1))
                 has_vm = "videoModel" in d
-            results[cfg["name"]] = {"status": res.status_code, "has_videoModel": has_vm, "title": title, "len": len(res.text)}
+            # Extract plain text
+            clean_text = re.sub(r'<[^>]+>', ' ', res.text)
+            clean_text = ' '.join(clean_text.split())
+            results[cfg["name"]] = {"status": res.status_code, "has_videoModel": has_vm, "title": title, "len": len(res.text), "text": clean_text[:400]}
         except Exception as e:
             results[cfg["name"]] = {"error": str(e)}
 
