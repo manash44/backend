@@ -572,35 +572,33 @@ def status_test() -> Any:
 def diagnose() -> Any:
     target_url = request.args.get("url", "https://xhamster46.desi/videos/police-wale-ne-soteli-bahan-ke-sath-rep-kar-diya-xhNaj7z")
     results: Dict[str, Any] = {}
-    try:
-        from curl_cffi import requests as cffi_requests
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Cookie": "age_verified=1; has_access=1; session_country=US; rta=1"
-        }
-        res = cffi_requests.get(target_url, headers=headers, impersonate="chrome", timeout=15)
-        results["curl_cffi_status"] = res.status_code
-        results["curl_cffi_final_url"] = str(res.url)
-        results["curl_cffi_length"] = len(res.text)
-        results["curl_cffi_has_initials"] = "window.initials" in res.text
-        m = re.search(r'window\.initials\s*=\s*({.+?})\s*;', res.text)
-        if m:
-            import json
-            data = json.loads(m.group(1))
-            results["initials_keys"] = list(data.keys())
-            results["has_videoModel"] = "videoModel" in data
-            results["has_xplayerSettings"] = "xplayerSettings" in data
-            results["vpnGeoList"] = data.get("vpnGeoList")
-            results["layoutBottom502Component"] = data.get("layoutBottom502Component")
-            results["sample_text"] = re.sub(r'<[^>]+>', ' ', res.text)[:600]
-            if "videoModel" in data and isinstance(data["videoModel"], dict):
-                results["videoModel_keys"] = list(data["videoModel"].keys())
-            if "xplayerSettings" in data and isinstance(data["xplayerSettings"], dict):
-                results["xplayerSettings_keys"] = list(data["xplayerSettings"].keys())
-        else:
-            results["sample_html"] = res.text[:500]
-    except Exception as e:
-        results["curl_cffi_error"] = str(e)
+    from curl_cffi import requests as cffi_requests
+    import json
+    import re
+
+    test_configs = [
+        {"name": "session_country_CA", "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "Cookie": "age_verified=1; has_access=1; session_country=CA; rta=1"}},
+        {"name": "session_country_DE", "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "Cookie": "age_verified=1; has_access=1; session_country=DE; rta=1"}},
+        {"name": "x_forwarded_for_DE", "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "Cookie": "age_verified=1; has_access=1; session_country=DE; rta=1", "X-Forwarded-For": "82.165.197.1", "CF-Connecting-IP": "82.165.197.1"}},
+        {"name": "x_forwarded_for_IN", "headers": {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "Cookie": "age_verified=1; has_access=1; session_country=IN; rta=1", "X-Forwarded-For": "49.37.108.26", "CF-Connecting-IP": "49.37.108.26"}},
+    ]
+
+    for cfg in test_configs:
+        try:
+            res = cffi_requests.get(target_url, headers=cfg["headers"], impersonate="chrome", timeout=10)
+            m = re.search(r'window\.initials\s*=\s*({.+?})\s*;', res.text)
+            has_vm = False
+            title = ""
+            tm = re.search(r'<title>(.+?)</title>', res.text)
+            if tm:
+                title = tm.group(1)
+            if m:
+                d = json.loads(m.group(1))
+                has_vm = "videoModel" in d
+            results[cfg["name"]] = {"status": res.status_code, "has_videoModel": has_vm, "title": title, "len": len(res.text)}
+        except Exception as e:
+            results[cfg["name"]] = {"error": str(e)}
+
     return jsonify(results)
 
 
