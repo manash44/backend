@@ -590,6 +590,9 @@ def diagnose() -> Any:
             results["initials_keys"] = list(data.keys())
             results["has_videoModel"] = "videoModel" in data
             results["has_xplayerSettings"] = "xplayerSettings" in data
+            results["vpnGeoList"] = data.get("vpnGeoList")
+            results["layoutBottom502Component"] = data.get("layoutBottom502Component")
+            results["sample_text"] = re.sub(r'<[^>]+>', ' ', res.text)[:600]
             if "videoModel" in data and isinstance(data["videoModel"], dict):
                 results["videoModel_keys"] = list(data["videoModel"].keys())
             if "xplayerSettings" in data and isinstance(data["xplayerSettings"], dict):
